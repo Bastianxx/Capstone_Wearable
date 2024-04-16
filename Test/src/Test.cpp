@@ -7,56 +7,105 @@
  */
 
 #include "Particle.h"
-
+#include "neopixel.h"
 
 
 SYSTEM_MODE(SEMI_AUTOMATIC);
 
-#define MAX_DEVICES 10 // Maximum number of devices to track
-#define ADDRESS_LENGTH 18 // Length of the device address string
-#define RSSI_THRESHOLD -80 // Example RSSI threshold for filtering
+const int PIXEL_PIN = D6;
+const int PIXEL_COUNT = 1;
+Adafruit_NeoPixel pixel(PIXEL_COUNT, SPI1, WS2812B);
 
+const BleUuid serviceUuid("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+const BleUuid rxUuid("6E400002-B5A3-F393-E0A9-E50E24DCCA9E");
+const BleUuid txUuid("6E400003-B5A3-F393-E0A9-E50E24DCCA9E");
+const size_t SCAN_RESULT_MAX = 10;
+BleScanResult scanResults[SCAN_RESULT_MAX];
+BleAdvertisingData data;
 
-struct Device {
-  char address[ADDRESS_LENGTH];
-  int rssi;
-};
+int rssi;
+int rssiArr[4] = {};
+int arrayCounter;
+int count;
+int average;
 
-Device devices[MAX_DEVICES]; // Array to store device information
-int deviceCount = 0; // Number of devices currently being tracked
-void scanResultCallback(const BleScanResult *scanResults, void *context);
 
 void setup() {
   Serial.begin(9600);
-  waitFor(Serial.isConnected, 10000);
+  waitFor(Serial.isConnected,2500);
+  Serial.println("Ready to Go\n");
   BLE.on();
+  data.appendServiceUUID(rxUuid);
+  BLE.advertise(&data);
+  pixel.begin();
+  pixel.setBrightness(225);
+  pixel.show();
 }
+
 void loop() {
-  BLE.scan(scanResultCallback);
-  delay(5000); // Scan for nearby devices every 5 seconds
+  scanRssi();
+  colorRange();
+  averageRssi();
+  //delay(1000);
+
 }
 
-
-void scanResultCallback(const BleScanResult *scanResults, void *context) {
-  // Store or update the RSSI value for the device address
-  for (int i = 0; i < deviceCount; i++) {
-    if (strcmp(devices[i].address, scanResults->address.toString().c_str()) == 0) {
-      devices[i].rssi = scanResults->rssi;
-      return; // Exit the function if address is found and updated
+void scanRssi(){
+  count = BLE.scan(scanResults, SCAN_RESULT_MAX);
+  //Serial.printf("%i Devices Found\n", count);
+  if(count > 0){
+    for(int ii = 0; ii < count; ii++){
+      //Serial.printf("BLE Address: %02X:%02X:%02X:%02X:%02X:%02X --- rssi: %i\n", scanResults[ii].address()[0], scanResults[ii].address()[1], scanResults[ii].address()[2], scanResults[ii].address()[3], scanResults[ii].address()[4], scanResults[ii].address()[5], scanResults[ii].rssi());
+      BleUuid foundServiceUuid;
+      size_t svcCount = scanResults[ii].advertisingData().serviceUUID(&foundServiceUuid,1);
+      if(svcCount > 0 && foundServiceUuid == rxUuid){
+        rssi = scanResults[ii].rssi();
+        Serial.printf("RSSI: %i\n",rssi); 
+      }      
     }
   }
-  // Add a new device if it's not already in the list
-  if (deviceCount < MAX_DEVICES) {
-    strncpy(devices[deviceCount].address, scanResults->address.toString().c_str(), ADDRESS_LENGTH);
-    devices[deviceCount].rssi = scanResults->rssi;
-    deviceCount++;
+}
+
+void averageRssi(){
+  int sum = 0;
+  rssiArr[arrayCounter] = rssi;
+  Serial.printf("arr element: %i--- arr value: %i\n", arrayCounter, rssiArr[arrayCounter]);
+  for(int i = 0; i <= 3; i++){
+    sum+=rssiArr[i];
   }
-  // Print the address and RSSI of all devices
-  Serial.println("Devices:");
-  for (int i = 0; i < deviceCount; i++) {
-    Serial.print("Address: ");
-    Serial.print(devices[i].address);
-    Serial.print(" | RSSI: ");
-    Serial.println(devices[i].rssi);
+  Serial.printf("sum %i\n", sum);
+  average=sum/4;
+  Serial.printf("avg: %i\n",average);
+  arrayCounter++;
+  if(arrayCounter >= 4){
+    arrayCounter=0;
+    sum = sum - rssiArr[arrayCounter];
   }
+}
+
+void colorRange(){
+  //hexColorMap = map(hexColorMap, 0x00FF00, 0xFF0000, -40, -70);
+   if(average > -40){
+    pixel.setPixelColor(0, 0,255,0);
+      pixel.show();
+
+  }
+  if((average < -40) && (average >= -50)){
+    pixel.setPixelColor(0, 0,0,255);
+      pixel.show();
+
+  }
+  if((average < -50) && (average >= -60)){
+    pixel.setPixelColor(0, 175,175,0);
+      pixel.show();
+
+  }
+  if(average < -60){
+    pixel.setPixelColor(0, 255,0,0);
+      pixel.show();
+
+  }
+  //pixel.show();
+  //hexColorMap = map(hexColorMap, 0x00FF00, 0xFF0000, -40, -70);
+
 }

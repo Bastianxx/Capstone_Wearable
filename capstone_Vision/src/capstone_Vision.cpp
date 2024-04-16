@@ -36,8 +36,23 @@ float accelGz;
 const int MPU_ADDR = (0x68);
 Adafruit_NeoPixel pixel(PIXELCOUNT, SPI1, WS2812B);
 
+
+
+const BleUuid serviceUuid("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+const BleUuid rxUuid("6E400002-B5A3-F393-E0A9-E50E24DCCA9E");
+const BleUuid txUuid("6E400003-B5A3-F393-E0A9-E50E24DCCA9E");
+
+void onDataReceived (const uint8_t* data , size_t len , const BlePeerDevice& peer , void *context);
+
+BleCharacteristic txCharacteristic("tx", BleCharacteristicProperty::NOTIFY, txUuid, serviceUuid);
+BleCharacteristic rxCharacteristic("rx", BleCharacteristicProperty::WRITE_WO_RSP, rxUuid, serviceUuid, onDataReceived, NULL);
+BleAdvertisingData data;
+
+
+
+
 // Let Device OS manage the connection to the Particle Cloud
-SYSTEM_MODE(AUTOMATIC);
+SYSTEM_MODE(SEMI_AUTOMATIC);
 
 
 
@@ -46,9 +61,16 @@ SYSTEM_MODE(AUTOMATIC);
 
 // setup() runs once, when the device is first turned on
 void setup() {
-Serial.begin(9600);
+  Serial.begin(9600);
   waitFor(Serial.isConnected,1000);
   BLE.on();
+  BLE.addCharacteristic(txCharacteristic);
+  BLE.addCharacteristic(rxCharacteristic);
+  data.appendServiceUUID(serviceUuid);
+  BLE.advertise(&data);
+
+  Serial.printf("Photon2 BLE Address: %s\n", BLE.address().toString().c_str());
+
 
   pinMode(TOUCHPIN, INPUT);                    // Touch Pin 
   pinMode(LED_BUILTIN, OUTPUT);
@@ -83,7 +105,7 @@ void loop() {
   int state = digitalRead(TOUCHPIN);
   digitalWrite(LED_BUILTIN, state);
   Serial.printf("Touch Sensor %i\n",state);
-  delay(5000);                      // Scan for nearby devices every 5 seconds
+                                    // Scan for nearby devices every 5 seconds
 
 
   Wire.beginTransmission(MPU_ADDR);
@@ -111,7 +133,7 @@ void loop() {
   Serial.printf("X-axis acceleration is %f \n",accelGx);
   Serial.printf("Y-axis acceleration is %f \n",accelGy);
   Serial.printf("Z-axis acceleration is %f \n",accelGz);
-  delay(1000);
+ 
 
 
 
