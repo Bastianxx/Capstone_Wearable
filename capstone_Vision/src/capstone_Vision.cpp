@@ -13,18 +13,24 @@
 #include "Time.h"
 #include "Colors.h"
 
-int rssi;
+int rssi;                                           //Strength of Bluetooth
 int count;
+int rssiArr[3] = {};
+int arrayCounter;
+int average;
+float signalStrength;
 
 const int BUFSIZE = 50; 
 
-const int PIXELCOUNT = 20;                          // Total number of NeoPixels
+const int PIXELCOUNT = 12;                          // Total number of NeoPixels
 const int DELAYLIGHT = 500;
-int neopixel_1;
+
 
 const int TOUCHPIN = D18;                            // Touch Sensor
 
 const int vibrationSensor = A5;                      // Vibration Sensor 
+int val = 0;
+int sensorValue;
 
 byte accel_x_h, accel_x_l;                          //variables to store the individual btyes
 int16_t accel_x;                                    //variable to store the x-acceleration
@@ -48,6 +54,10 @@ const BleUuid txUuid("6E400003-B5A3-F393-E0A9-E50E24DCCA9E");
 
 void onDataReceived (const uint8_t* data , size_t len , const BlePeerDevice& peer , void *context);
 void scanRssi(); 
+void rssiAverage();
+void rssiRange();
+void pixelFill(int start,int end, int color);
+
 
 //BleCharacteristic txCharacteristic("tx", BleCharacteristicProperty::NOTIFY, txUuid, serviceUuid);
 //BleCharacteristic rxCharacteristic("rx", BleCharacteristicProperty::WRITE_WO_RSP, rxUuid, serviceUuid, onDataReceived, NULL);
@@ -61,9 +71,6 @@ BleAdvertisingData data;
 
 // Let Device OS manage the connection to the Particle Cloud
 SYSTEM_MODE(SEMI_AUTOMATIC);
-
-
-
 
 
 
@@ -84,7 +91,8 @@ void setup() {
   pinMode(TOUCHPIN, INPUT);                    // Touch Pin 
   pinMode(LED_BUILTIN, OUTPUT);
 
-  pinMode(vibrationSensor, INPUT);             // Vibration Sensor
+  pinMode(vibrationSensor, OUTPUT);             // Vibration Sensor
+  pinSetDriveStrength(D14, DriveStrength::HIGH);
 
   Wire.begin();                              //Begin I2C communications 
   Wire.beginTransmission (MPU_ADDR);         //Begin transmission to MPU
@@ -93,28 +101,27 @@ void setup() {
   Wire.endTransmission(true);
   
 
-
-
-
-  //pixel.begin();
-  //pixel.setBrightness(45);
-  //pixel.show(); 
-  //neopixel_1 = magenta;
-
-
-
+  pixel.begin();
+  pixel.setBrightness(45);
+  pixel.show(); 
+  
 
   
   }
 
-// loop() runs over and over again, as quickly as it can execute.
+
+
 void loop() {
   int state = digitalRead(TOUCHPIN);
   digitalWrite(LED_BUILTIN, state);
   Serial.printf("Touch Sensor %i\n",state);
-                                    // Scan for nearby devices every 5 seconds
+                                    
 
-  scanRssi();
+  scanRssi();                                 // Scan for nearby devices every 5 seconds
+  rssiAverage();
+  rssiRange();
+
+
 
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(0x3B);
@@ -143,17 +150,6 @@ void loop() {
   Serial.printf("Z-axis acceleration is %f \n",accelGz);
  
 
-
-
- //for (neopixel_1=0; neopixel_1<=19; neopixel_1++){
-  
-  //pixel.setPixelColor(neopixel_1,144,66,0);
-  //pixel.show ();
-  //delay (DELAYLIGHT);
-  //pixel.clear();
-  //pixel.show();
-  //}
-
 }
 
 
@@ -172,3 +168,62 @@ void scanRssi(){
     }
   }
 }
+
+
+void rssiAverage(){
+  int sum = 0;
+  rssiArr[arrayCounter] = rssi;
+  Serial.printf("arr element: %i--- arr value: %i\n", arrayCounter, rssiArr[arrayCounter]);
+  for(int i = 0; i <= 2; i++){
+    sum+=rssiArr[i];
+  }
+  Serial.printf("sum %i\n", sum);
+  average=sum/3;
+  Serial.printf("avg: %i\n",average);
+  arrayCounter++;
+  if(arrayCounter >= 2){
+    arrayCounter=0;
+    sum = sum - rssiArr[arrayCounter];
+  }
+}
+
+void rssiRange() {
+  //hexColorMap = map(hexColorMap, 0x00FF00, 0xFF0000, -40, -70);
+   if(average > -30){
+    analogWrite(vibrationSensor,0);
+    pixelFill (0,11,green);
+      pixel.show();
+
+  }
+  if((average < -30) && (average >= -45)){
+    analogWrite(vibrationSensor,255);
+    pixelFill (0,11,blue);
+      pixel.show();
+
+  }
+  
+  if(average < -45){
+    analogWrite(vibrationSensor,0);
+    pixelFill (0,11,red);
+      pixel.show();
+
+  }
+  //pixel.show();
+  //hexColorMap = map(hexColorMap, 0x00FF00, 0xFF0000, -40, -70);
+
+}
+
+void pixelFill(int start,int end, int color){
+  int neopixel_1;
+  pixel.clear();
+for (neopixel_1=start; neopixel_1<=end; neopixel_1++){
+  pixel.setPixelColor(neopixel_1,color); 
+  }
+ pixel.show ();
+}
+
+
+
+
+
+
