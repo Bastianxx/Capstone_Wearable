@@ -13,6 +13,10 @@
 #include "Time.h"
 #include "Colors.h"
 
+int rssi;
+int count;
+
+const int BUFSIZE = 50; 
 
 const int PIXELCOUNT = 20;                          // Total number of NeoPixels
 const int DELAYLIGHT = 500;
@@ -20,7 +24,7 @@ int neopixel_1;
 
 const int TOUCHPIN = D18;                            // Touch Sensor
 
-const int vibrationSensor = D4;                      // Vibration Sensor 
+const int vibrationSensor = A5;                      // Vibration Sensor 
 
 byte accel_x_h, accel_x_l;                          //variables to store the individual btyes
 int16_t accel_x;                                    //variable to store the x-acceleration
@@ -43,11 +47,15 @@ const BleUuid rxUuid("6E400002-B5A3-F393-E0A9-E50E24DCCA9E");
 const BleUuid txUuid("6E400003-B5A3-F393-E0A9-E50E24DCCA9E");
 
 void onDataReceived (const uint8_t* data , size_t len , const BlePeerDevice& peer , void *context);
+void scanRssi(); 
 
-BleCharacteristic txCharacteristic("tx", BleCharacteristicProperty::NOTIFY, txUuid, serviceUuid);
-BleCharacteristic rxCharacteristic("rx", BleCharacteristicProperty::WRITE_WO_RSP, rxUuid, serviceUuid, onDataReceived, NULL);
+//BleCharacteristic txCharacteristic("tx", BleCharacteristicProperty::NOTIFY, txUuid, serviceUuid);
+//BleCharacteristic rxCharacteristic("rx", BleCharacteristicProperty::WRITE_WO_RSP, rxUuid, serviceUuid, onDataReceived, NULL);
+
+
+const size_t SCAN_RESULT_MAX = 10;
+BleScanResult scanResults[SCAN_RESULT_MAX];
 BleAdvertisingData data;
-
 
 
 
@@ -62,12 +70,13 @@ SYSTEM_MODE(SEMI_AUTOMATIC);
 // setup() runs once, when the device is first turned on
 void setup() {
   Serial.begin(9600);
-  waitFor(Serial.isConnected,1000);
+  waitFor(Serial.isConnected,2500);
+  Serial.println("Ready to Go\n");
+  
   BLE.on();
-  BLE.addCharacteristic(txCharacteristic);
-  BLE.addCharacteristic(rxCharacteristic);
-  data.appendServiceUUID(serviceUuid);
+  data.appendServiceUUID(rxUuid);
   BLE.advertise(&data);
+  BLE.setTxPower(-20);
 
   Serial.printf("Photon2 BLE Address: %s\n", BLE.address().toString().c_str());
 
@@ -79,10 +88,8 @@ void setup() {
 
   Wire.begin();                              //Begin I2C communications 
   Wire.beginTransmission (MPU_ADDR);         //Begin transmission to MPU
-
   Wire.write (0x6B);
   Wire.write (0x00);
-
   Wire.endTransmission(true);
   
 
@@ -107,6 +114,7 @@ void loop() {
   Serial.printf("Touch Sensor %i\n",state);
                                     // Scan for nearby devices every 5 seconds
 
+  scanRssi();
 
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(0x3B);
@@ -149,3 +157,18 @@ void loop() {
 }
 
 
+void scanRssi(){
+  count = BLE.scan(scanResults, SCAN_RESULT_MAX);
+  //Serial.printf("%i Devices Found\n", count);
+  if(count > 0){
+    for(int ii = 0; ii < count; ii++){
+      //Serial.printf("BLE Address: %02X:%02X:%02X:%02X:%02X:%02X --- rssi: %i\n", scanResults[ii].address()[0], scanResults[ii].address()[1], scanResults[ii].address()[2], scanResults[ii].address()[3], scanResults[ii].address()[4], scanResults[ii].address()[5], scanResults[ii].rssi());
+      BleUuid foundServiceUuid;
+      size_t svcCount = scanResults[ii].advertisingData().serviceUUID(&foundServiceUuid,1);
+      if(svcCount > 0 && foundServiceUuid == rxUuid){
+        rssi = scanResults[ii].rssi();
+        Serial.printf("RSSI: %i\n",rssi); 
+      }      
+    }
+  }
+}
