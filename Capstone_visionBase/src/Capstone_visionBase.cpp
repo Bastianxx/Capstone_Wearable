@@ -79,7 +79,7 @@ void rssiRange();
 void pixelFill(int start,int end, int color);
 
 
-void pixelFill (int start, int end, int hexcolor, int pixelBrightness);
+//void pixelFill (int start, int end, int hexcolor, int pixelBrightness);
 int segment;
 
 
@@ -201,6 +201,27 @@ void scanRssi(){
   }
 }
 
+void rssiAverage(){
+  int sum = 0;
+  rssiArr[arrayCounter] = rssi;
+  Serial.printf("arr element: %i--- arr value: %i\n", arrayCounter, rssiArr[arrayCounter]);
+  for(int i = 0; i <= 3; i++){
+    sum+=rssiArr[i];
+  }
+  Serial.printf("sum %i\n", sum);
+  average=sum/4;
+  Serial.printf("avg: %i\n",average);
+  arrayCounter++;
+  if(arrayCounter >= 3){
+    arrayCounter=0;
+    sum = sum - rssiArr[arrayCounter];
+  }
+}
+
+
+
+
+
 void rssiRange() {
    if(average > -30){
     pixelFill (0,11,green);
@@ -223,3 +244,12 @@ void rssiRange() {
   }
  }
 
+
+void pixelFill(int start,int end, int color){
+  int neopixel_1;
+  pixel.clear();
+for (neopixel_1=start; neopixel_1<=end; neopixel_1++){
+  pixel.setPixelColor(neopixel_1,color); 
+  }
+ pixel.show ();
+}

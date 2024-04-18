@@ -12,10 +12,15 @@
 #include "Wire.h"
 #include "Time.h"
 #include "Colors.h"
+#include <Adafruit_MQTT.h>
+#include "Adafruit_MQTT/Adafruit_MQTT_SPARK.h"
+#include "Adafruit_MQTT/Adafruit_MQTT.h"
+#include "credentials.h"
+#include "IoTTimer.h"
 
 int rssi;                                           //Strength of Bluetooth
 int count;
-int rssiArr[3] = {};
+int rssiArr[4] = {};
 int arrayCounter;
 int average;
 float signalStrength;
@@ -27,6 +32,7 @@ const int DELAYLIGHT = 500;
 
 
 const int TOUCHPIN = D18;                            // Touch Sensor
+int lastTime;
 
 const int vibrationSensor = A5;                      // Vibration Sensor 
 int val = 0;
@@ -43,9 +49,29 @@ float accelGx;
 float accelGy;
 float accelGz;
 
+float shockValue;                                   // Shock Value 
+
+
+// Global State 
+TCPClient TheClient; 
+
 const int MPU_ADDR = (0x68);
 Adafruit_NeoPixel pixel(PIXELCOUNT, SPI1, WS2812B);
 
+// MQTT Server and Wifi Login
+IoTTimer plantTimer;
+Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY); 
+
+//Feeds 
+//Adafruit_MQTT_Subscribe cancelAlert = Adafruit_MQTT_Subscribe(&mqtt,AIO_USERNAME "/feeds/cancel-alert");
+
+Adafruit_MQTT_Publish impactAlert = Adafruit_MQTT_Publish(&mqtt,AIO_USERNAME "/feeds/impact-alert");
+Adafruit_MQTT_Publish cancelAlert = Adafruit_MQTT_Publish(&mqtt,AIO_USERNAME "/feeds/cancel-alert");
+
+
+//Functions
+void MQTT_connect();
+bool MQTT_ping(); 
 
 
 const BleUuid serviceUuid("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
@@ -79,7 +105,17 @@ void setup() {
   Serial.begin(9600);
   waitFor(Serial.isConnected,2500);
   Serial.println("Ready to Go\n");
+
+  WiFi.connect();
+  while(WiFi.connecting()) {
+    Serial.printf(".");
+  }
   
+  //mqtt.subscribe(&cancelAlert);                          //MQTT subscription
+  //mqtt.publish(&impactAlert);
+  //mqtt.publish(&cancelAlert);
+
+
   BLE.on();
   data.appendServiceUUID(rxUuid);
   BLE.advertise(&data);
@@ -105,8 +141,6 @@ void setup() {
   pixel.setBrightness(45);
   pixel.show(); 
   
-
-  
   }
 
 
@@ -115,13 +149,24 @@ void loop() {
   int state = digitalRead(TOUCHPIN);
   digitalWrite(LED_BUILTIN, state);
   Serial.printf("Touch Sensor %i\n",state);
+  if (state == 1){
+    if(mqtt.Update()) {
+      cancelAlert.publish("I am Ok cancel Alert");
+  }
+  }
+  else {
+    cancelAlert.publish(" ");
+  }
                                     
 
   scanRssi();                                 // Scan for nearby devices every 5 seconds
   rssiAverage();
   rssiRange();
 
+  MQTT_connect();                             // wifi and adafruit publish 
+  MQTT_ping();
 
+ 
 
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(0x3B);
@@ -144,12 +189,22 @@ void loop() {
   accelGy = (-3.0/-49127)* accel_y;
   accelGz = (-3.0/-49127)* accel_z;
 
-
-  Serial.printf("X-axis acceleration is %f \n",accelGx);
-  Serial.printf("Y-axis acceleration is %f \n",accelGy);
-  Serial.printf("Z-axis acceleration is %f \n",accelGz);
+  shockValue = sqrt ((accelGx*accelGx)+(accelGy*accelGy)+(accelGz*accelGz));
+  Serial.printf("Value of shock %f \n",shockValue);
  
-
+  
+  if (shockValue > 1.8){
+    if(mqtt.Update()) {
+      impactAlert.publish(shockValue);
+  }
+  }
+  if((millis()-lastTime > 10000)) {
+   if(mqtt.Update()) {
+     impactAlert.publish(shockValue);
+   
+    } 
+    lastTime = millis();
+  }
 }
 
 
@@ -174,21 +229,21 @@ void rssiAverage(){
   int sum = 0;
   rssiArr[arrayCounter] = rssi;
   Serial.printf("arr element: %i--- arr value: %i\n", arrayCounter, rssiArr[arrayCounter]);
-  for(int i = 0; i <= 2; i++){
+  for(int i = 0; i <= 3; i++){
     sum+=rssiArr[i];
   }
   Serial.printf("sum %i\n", sum);
-  average=sum/3;
+  average=sum/4;
   Serial.printf("avg: %i\n",average);
   arrayCounter++;
-  if(arrayCounter >= 2){
+  if(arrayCounter >= 3){
     arrayCounter=0;
     sum = sum - rssiArr[arrayCounter];
   }
 }
 
 void rssiRange() {
-  //hexColorMap = map(hexColorMap, 0x00FF00, 0xFF0000, -40, -70);
+  
    if(average > -30){
     analogWrite(vibrationSensor,0);
     pixelFill (0,11,green);
@@ -197,12 +252,17 @@ void rssiRange() {
   }
   if((average < -30) && (average >= -45)){
     analogWrite(vibrationSensor,255);
+    pixelFill (0,11,magenta);
+      pixel.show();
+  }
+ 
+ if((average < -45) && (average >= -60)){
+    analogWrite(vibrationSensor,255);
     pixelFill (0,11,blue);
       pixel.show();
-
   }
   
-  if(average < -45){
+  if(average < -60){
     analogWrite(vibrationSensor,0);
     pixelFill (0,11,red);
       pixel.show();
@@ -210,8 +270,8 @@ void rssiRange() {
   }
   //pixel.show();
   //hexColorMap = map(hexColorMap, 0x00FF00, 0xFF0000, -40, -70);
+ }
 
-}
 
 void pixelFill(int start,int end, int color){
   int neopixel_1;
@@ -222,6 +282,40 @@ for (neopixel_1=start; neopixel_1<=end; neopixel_1++){
  pixel.show ();
 }
 
+
+void MQTT_connect() {
+  int8_t ret;
+ 
+  // Return if already connected.
+  if (mqtt.connected()) {
+    return;
+  }
+    Serial.print("Connecting to MQTT... ");
+ 
+  while ((ret = mqtt.connect()) != 0) {                         // connect will return 0 for connected
+       Serial.printf("Error Code %s\n",mqtt.connectErrorString(ret));
+       Serial.printf("Retrying MQTT connection in 5 seconds...\n");
+       mqtt.disconnect();
+       delay(5000);                                              // wait 5 seconds and try again
+  }
+    Serial.printf("MQTT Connected!\n");
+}
+
+bool MQTT_ping() {
+  static unsigned int last;
+  bool pingStatus;
+
+  if ((millis()-last)>120000) {
+      Serial.printf("Pinging MQTT \n");
+      pingStatus = mqtt.ping();
+      if(!pingStatus) {
+        Serial.printf("Disconnecting \n");
+        mqtt.disconnect();
+      }
+      last = millis();
+  }
+  return pingStatus;
+}
 
 
 
